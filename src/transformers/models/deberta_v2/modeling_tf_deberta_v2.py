@@ -96,9 +96,9 @@ class TFDebertaV2XSoftmax(tf.keras.layers.Layer):
     def call(self, inputs: tf.Tensor, mask: tf.Tensor):
 
         rmask = tf.logical_not(tf.cast(mask, tf.bool))
-        output = tf.where(rmask, float("-inf"), inputs)
+        output = tf.where(rmask, tf.cast(float("-inf"), inputs.dtype), inputs)
         output = stable_softmax(output, self.axis)
-        output = tf.where(rmask, 0.0, output)
+        output = tf.where(rmask, tf.cast(0.0, inputs.dtype), output)
         return output
 
 
@@ -125,13 +125,13 @@ class TFDebertaV2StableDropout(tf.keras.layers.Layer):
             - tf.compat.v1.distributions.Bernoulli(probs=1.0 - self.drop_prob).sample(sample_shape=shape_list(inputs)),
             tf.bool,
         )
-        scale = tf.convert_to_tensor(1.0 / (1 - self.drop_prob), dtype=tf.float32)
+        scale = tf.convert_to_tensor(1.0 / (1 - self.drop_prob), dtype=inputs.dtype)
         if self.drop_prob > 0:
-            inputs = tf.where(mask, 0.0, inputs) * scale
+            inputs = tf.where(mask, tf.cast(0.0, inputs.dtype), inputs) * scale
 
         def grad(upstream):
             if self.drop_prob > 0:
-                return tf.where(mask, 0.0, upstream) * scale
+                return tf.where(mask, tf.cast(0.0, inputs.dtype), upstream) * scale
             else:
                 return upstream
 
@@ -322,7 +322,7 @@ class TFDebertaV2ConvLayer(tf.keras.layers.Layer):
             if len(shape_list(input_mask)) != len(shape_list(layer_norm_input)):
                 if len(shape_list(input_mask)) == 4:
                     input_mask = tf.squeeze(tf.squeeze(input_mask, axis=1), axis=1)
-                input_mask = tf.cast(tf.expand_dims(input_mask, axis=2), tf.float32)
+                input_mask = tf.cast(tf.expand_dims(input_mask, axis=2), output.dtype)
 
             output_states = output * input_mask
 
@@ -676,7 +676,7 @@ class TFDebertaV2DisentangledSelfAttention(tf.keras.layers.Layer):
             scale_factor += 1
         if "p2c" in self.pos_att_type:
             scale_factor += 1
-        scale = tf.math.sqrt(tf.cast(shape_list(query_layer)[-1] * scale_factor, tf.float32))
+        scale = tf.math.sqrt(tf.cast(shape_list(query_layer)[-1] * scale_factor, query_layer.dtype))
         attention_scores = tf.matmul(query_layer, tf.transpose(key_layer, [0, 2, 1])) / scale
         if self.relative_attention:
             rel_embeddings = self.pos_dropout(rel_embeddings)
@@ -760,7 +760,7 @@ class TFDebertaV2DisentangledSelfAttention(tf.keras.layers.Layer):
         score = 0
         # content->position
         if "c2p" in self.pos_att_type:
-            scale = tf.math.sqrt(tf.cast(shape_list(pos_key_layer)[-1] * scale_factor, tf.float32))
+            scale = tf.math.sqrt(tf.cast(shape_list(pos_key_layer)[-1] * scale_factor, query_layer.dtype))
             c2p_att = tf.matmul(query_layer, tf.transpose(pos_key_layer, [0, 2, 1]))
             c2p_pos = tf.clip_by_value(relative_pos + att_span, 0, att_span * 2 - 1)
             c2p_att = take_along_axis(
@@ -774,7 +774,7 @@ class TFDebertaV2DisentangledSelfAttention(tf.keras.layers.Layer):
 
         # position->content
         if "p2c" in self.pos_att_type:
-            scale = tf.math.sqrt(tf.cast(shape_list(pos_query_layer)[-1] * scale_factor, tf.float32))
+            scale = tf.math.sqrt(tf.cast(shape_list(pos_query_layer)[-1] * scale_factor, key_layer.dtype))
             if shape_list(key_layer)[-2] != shape_list(query_layer)[-2]:
                 r_pos = build_relative_position(
                     shape_list(key_layer)[-2],
@@ -909,7 +909,7 @@ class TFDebertaV2Embeddings(tf.keras.layers.Layer):
             if len(shape_list(mask)) != len(shape_list(final_embeddings)):
                 if len(shape_list(mask)) == 4:
                     mask = tf.squeeze(tf.squeeze(mask, axis=1), axis=1)
-                mask = tf.cast(tf.expand_dims(mask, axis=2), tf.float32)
+                mask = tf.cast(tf.expand_dims(mask, axis=2), final_embeddings.dtype)
 
             final_embeddings = final_embeddings * mask
 
